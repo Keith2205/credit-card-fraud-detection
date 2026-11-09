@@ -1,87 +1,51 @@
-# 1D Convolutional Neural Network for Credit Card Fraud Detection
+"""1D Convolutional Neural Network (CNN) for credit card fraud detection.
 
-# === Import Libraries ===
-import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
-from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.models import Sequential  # type: ignore
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout  # type: ignore
-from tensorflow.keras.utils import to_categorical  # type: ignore
-import matplotlib.pyplot as plt
-from pprint import pprint
+The 30 features are reshaped to a 6 x 5 grid (6 steps of 5 channels). One
+Conv1D layer (32 filters, kernel size 3) is followed by max pooling, flattening,
+a 32-unit dense layer with dropout 0.3, and a sigmoid output. Trained with the
+shared recipe in common.train_keras_classifier.
+"""
+import sys
+from pathlib import Path
 
-# === Load Dataset ===
-df = pd.read_csv("creditcard.csv")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import common  # noqa: E402
 
-# === Normalize 'Amount' and 'Time' ===
-scaler = StandardScaler()
-df['normAmount'] = scaler.fit_transform(df['Amount'].values.reshape(-1, 1))
-df['normTime'] = scaler.fit_transform(df['Time'].values.reshape(-1, 1))
-df.drop(['Amount', 'Time'], axis=1, inplace=True)
+import tensorflow as tf  # noqa: E402
+from tensorflow.keras import layers  # noqa: E402
 
-# === Feature/Target Split ===
-X = df.drop('Class', axis=1).values
-y = df['Class'].values
 
-# === Full Train/Test Split (No Subsampling) ===
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.3, stratify=y, random_state=42
-)
+def reshape(X):
+    return X.reshape(-1, 6, 5)
 
-# === Reshape for 1D CNN Input (e.g., 30 → 6x5) ===
-X_train_cnn = X_train.reshape(-1, 6, 5)
-X_test_cnn = X_test.reshape(-1, 6, 5)
 
-# === One-Hot Encode Labels for Keras ===
-y_train_cnn = to_categorical(y_train, num_classes=2)
-y_test_cnn = to_categorical(y_test, num_classes=2)
+def build_model():
+    return tf.keras.Sequential([
+        layers.Input(shape=(6, 5)),
+        layers.Conv1D(32, kernel_size=3, activation="relu"),
+        layers.MaxPooling1D(pool_size=2),
+        layers.Flatten(),
+        layers.Dense(32, activation="relu"),
+        layers.Dropout(0.3),
+        layers.Dense(1, activation="sigmoid"),
+    ])
 
-# === Build CNN Model ===
-cnn_model = Sequential([
-    Conv1D(filters=32, kernel_size=2, activation='relu', input_shape=(6, 5)),
-    MaxPooling1D(pool_size=2),
-    Flatten(),
-    Dense(32, activation='relu'),
-    Dropout(0.3),
-    Dense(2, activation='softmax')
-])
 
-cnn_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+def main():
+    common.set_seed()
+    X_train, X_val, X_test, y_train, y_val, y_test = common.neural_split()
+    X_train, X_val, X_test = (reshape(X_train), reshape(X_val), reshape(X_test))
 
-# === Train CNN ===
-cnn_model.fit(X_train_cnn, y_train_cnn, epochs=10, batch_size=32, verbose=0)
+    model = build_model()
+    model.summary()
+    seconds, epochs = common.train_keras_classifier(model, X_train, y_train, X_val, y_val)
 
-# === Predict ===
-y_pred_proba_cnn = cnn_model.predict(X_test_cnn)
-y_pred_cnn = np.argmax(y_pred_proba_cnn, axis=1)
-y_true_cnn = np.argmax(y_test_cnn, axis=1)
+    scores = model.predict(X_test, batch_size=4096, verbose=0).ravel()
+    return common.evaluate(
+        "CNN", "cnn", y_test, (scores >= 0.5).astype(int), scores, seconds,
+        extra={"epochs_run": epochs},
+    )
 
-# === Evaluation ===
-conf_matrix_cnn = confusion_matrix(y_true_cnn, y_pred_cnn)
-class_report_cnn = classification_report(y_true_cnn, y_pred_cnn, output_dict=True)
-roc_auc_cnn = roc_auc_score(y_true_cnn, y_pred_proba_cnn[:, 1])
 
-# === Display Results ===
-print("=== Confusion Matrix (CNN) ===")
-print(conf_matrix_cnn)
-
-print("\n=== Classification Report (CNN) ===")
-pprint(class_report_cnn)
-
-print(f"\nROC AUC Score (CNN): {roc_auc_cnn:.4f}")
-
-# === Plot ROC Curve ===
-fpr_cnn, tpr_cnn, _ = roc_curve(y_true_cnn, y_pred_proba_cnn[:, 1])
-
-plt.figure(figsize=(8, 5))
-plt.plot(fpr_cnn, tpr_cnn, label=f"AUC = {roc_auc_cnn:.4f}")
-plt.plot([0, 1], [0, 1], 'k--')
-plt.xlabel("False Positive Rate")
-plt.ylabel("True Positive Rate")
-plt.title("ROC Curve - CNN")
-plt.legend()
-plt.grid()
-plt.tight_layout()
-plt.show()
+if __name__ == "__main__":
+    main()

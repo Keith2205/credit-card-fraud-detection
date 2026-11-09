@@ -1,0 +1,7 @@
+# Versions used to produce the results in this repository (Python 3.13)
+numpy==2.5.1
+pandas==3.0.3
+scikit-learn==1.9.0
+xgboost==3.4.1
+tensorflow==2.21.0
+matplotlib==3.11.1

@@ -1,83 +1,70 @@
-# Autoencoder for Unsupervised Fraud Detection
+"""Autoencoder for unsupervised credit card fraud detection.
 
-# === Import Libraries ===
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score, roc_curve
-from tensorflow.keras.models import Model  # type: ignore
-from tensorflow.keras.layers import Input, Dense  # type: ignore
-import matplotlib.pyplot as plt
-from pprint import pprint
+The network never sees a fraud label during training. It is trained only on the
+legitimate transactions of the training split to reconstruct its input
+(30 -> 16 -> 8 -> 16 -> 30, ReLU hidden layers, linear output, MSE loss, Adam).
+Early stopping uses the reconstruction loss on the legitimate validation
+transactions.
 
-# === Load Dataset ===
-df = pd.read_csv("creditcard.csv")
-X = df.drop("Class", axis=1)
-y = df["Class"]
+At test time, a transaction is flagged as fraud when its reconstruction error is
+above the 95th percentile of the reconstruction errors on the training data.
+The reconstruction error itself is the score used for the ROC curve.
+"""
+import sys
+from pathlib import Path
 
-# === Normalize Features ===
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import common  # noqa: E402
 
-# === Separate Normal and Fraud Data ===
-X_normal = X_scaled[y == 0]
-X_fraud = X_scaled[y == 1]
+import numpy as np  # noqa: E402
+import tensorflow as tf  # noqa: E402
+from tensorflow.keras import layers  # noqa: E402
 
-# === Use all normal transactions for training (Unsupervised Learning) ===
-X_train = X_normal  # No subsampling
+THRESHOLD_PERCENTILE = 95
 
-# === Use full dataset for testing ===
-X_test = X_scaled
-y_test = y.values
 
-# === Build Autoencoder ===
-input_dim = X_train.shape[1]
-input_layer = Input(shape=(input_dim,))
-encoded = Dense(16, activation='relu')(input_layer)
-encoded = Dense(8, activation='relu')(encoded)
-decoded = Dense(16, activation='relu')(encoded)
-output_layer = Dense(input_dim, activation='linear')(decoded)
+def build_model():
+    return tf.keras.Sequential([
+        layers.Input(shape=(30,)),
+        layers.Dense(16, activation="relu"),
+        layers.Dense(8, activation="relu"),   # 8-dimensional bottleneck
+        layers.Dense(16, activation="relu"),
+        layers.Dense(30, activation="linear"),
+    ])
 
-autoencoder = Model(inputs=input_layer, outputs=output_layer)
-autoencoder.compile(optimizer='adam', loss='mse')
 
-# === Train Autoencoder ===
-autoencoder.fit(X_train, X_train, epochs=20, batch_size=32, shuffle=True, verbose=1)
+def reconstruction_error(model, X):
+    X_hat = model.predict(X, batch_size=4096, verbose=0)
+    return np.mean((X - X_hat) ** 2, axis=1)
 
-# === Predict and Compute Reconstruction Error ===
-X_test_pred = autoencoder.predict(X_test)
-mse = np.mean(np.power(X_test - X_test_pred, 2), axis=1)
 
-# === Set Threshold for Anomaly Detection (95th percentile of normal reconstruction errors) ===
-threshold = np.percentile(mse[y == 0], 95)
+def main():
+    common.set_seed()
+    X_train, X_val, X_test, y_train, y_val, y_test = common.neural_split()
+    X_train_legit = X_train[y_train == 0]
+    X_val_legit = X_val[y_val == 0]
 
-# === Classify: 1 if error > threshold ===
-y_pred = (mse > threshold).astype(int)
+    model = build_model()
+    model.compile(optimizer="adam", loss="mse")
+    with common.Timer() as t:
+        history = model.fit(
+            X_train_legit, X_train_legit,
+            validation_data=(X_val_legit, X_val_legit),
+            epochs=common.EPOCHS,
+            batch_size=common.BATCH_SIZE,
+            callbacks=[common.keras_early_stopping(monitor="val_loss", mode="min")],
+            verbose=2,
+        )
 
-# === Evaluation ===
-conf_matrix_ae = confusion_matrix(y_test, y_pred)
-class_report_ae = classification_report(y_test, y_pred, output_dict=True)
-roc_auc_ae = roc_auc_score(y_test, mse)
+    threshold = np.percentile(reconstruction_error(model, X_train_legit), THRESHOLD_PERCENTILE)
+    errors = reconstruction_error(model, X_test)
+    print(f"Anomaly threshold (95th percentile of training error): {threshold:.4f}")
 
-# === Display Results ===
-print("=== Confusion Matrix (Autoencoder) ===")
-print(conf_matrix_ae)
+    return common.evaluate(
+        "Autoencoder", "autoencoder", y_test, (errors > threshold).astype(int), errors, t.seconds,
+        extra={"epochs_run": len(history.history["loss"]), "threshold": round(float(threshold), 4)},
+    )
 
-print("\n=== Classification Report (Autoencoder) ===")
-pprint(class_report_ae)
 
-print(f"\nROC AUC Score (Autoencoder): {roc_auc_ae:.4f}")
-
-# === Plot ROC Curve ===
-fpr, tpr, _ = roc_curve(y_test, mse)
-plt.figure(figsize=(8, 5))
-plt.plot(fpr, tpr, label=f"AUC = {roc_auc_ae:.4f}")
-plt.plot([0, 1], [0, 1], 'k--')
-plt.xlabel("False Positive Rate")
-plt.ylabel("True Positive Rate")
-plt.title("ROC Curve - Autoencoder")
-plt.legend()
-plt.grid()
-plt.tight_layout()
-plt.show()
+if __name__ == "__main__":
+    main()

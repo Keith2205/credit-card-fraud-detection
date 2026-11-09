@@ -1,65 +1,31 @@
-# Support Vector Machine (SVM) for Credit Card Fraud Detection 
+"""Support Vector Machine for credit card fraud detection.
 
-# === Import Libraries ===
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.svm import SVC
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import (
-    classification_report, confusion_matrix, roc_auc_score, roc_curve
-)
-import matplotlib.pyplot as plt
-from pprint import pprint
+RBF kernel with class_weight='balanced'. The ROC curve uses the SVM's
+decision-function score; Platt-scaled probabilities (probability=True) give the
+same ranking, so the same AUC, but cost five extra fits on ~200k rows.
+"""
+import sys
+from pathlib import Path
 
-# === Load Dataset ===
-df = pd.read_csv("creditcard.csv")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import common  # noqa: E402
 
-# === Normalize 'Amount' and 'Time' ===
-scaler = StandardScaler()
-df['normAmount'] = scaler.fit_transform(df['Amount'].values.reshape(-1, 1))
-df['normTime'] = scaler.fit_transform(df['Time'].values.reshape(-1, 1))
-df.drop(['Amount', 'Time'], axis=1, inplace=True)
+from sklearn.svm import SVC  # noqa: E402
 
-# === Feature / Target Split ===
-X = df.drop('Class', axis=1)
-y = df['Class']
 
-# === Full Train-Test Split (NO Subsampling) ===
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.3, stratify=y, random_state=42
-)
+def main():
+    common.set_seed()
+    X_train, X_test, y_train, y_test = common.classical_split()
 
-# === SVM Model with RBF Kernel and Class Imbalance Handling ===
-svm_model = SVC(kernel='rbf', probability=True, class_weight='balanced', random_state=42)
-svm_model.fit(X_train, y_train)
+    model = SVC(kernel="rbf", class_weight="balanced", cache_size=2000, random_state=common.SEED)
+    with common.Timer() as t:
+        model.fit(X_train, y_train)
 
-# === Predict ===
-y_pred = svm_model.predict(X_test)
-y_proba = svm_model.predict_proba(X_test)[:, 1]
+    return common.evaluate(
+        "SVM", "svm", y_test,
+        model.predict(X_test), model.decision_function(X_test), t.seconds,
+    )
 
-# === Evaluation ===
-conf_matrix = confusion_matrix(y_test, y_pred)
-class_report = classification_report(y_test, y_pred, output_dict=True)
-roc_auc = roc_auc_score(y_test, y_proba)
 
-print("=== Confusion Matrix (SVM) ===")
-print(conf_matrix)
-
-print("\n=== Classification Report (SVM) ===")
-pprint(class_report)
-
-print(f"\nROC AUC Score (SVM): {roc_auc:.4f}")
-
-# === ROC Curve ===
-fpr, tpr, _ = roc_curve(y_test, y_proba)
-plt.figure(figsize=(8, 5))
-plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.4f}")
-plt.plot([0, 1], [0, 1], 'k--')
-plt.xlabel("False Positive Rate")
-plt.ylabel("True Positive Rate")
-plt.title("ROC Curve - SVM")
-plt.legend()
-plt.grid()
-plt.tight_layout()
-plt.show()
+if __name__ == "__main__":
+    main()

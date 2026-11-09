@@ -1,76 +1,38 @@
-# XGBoost Classifier for Credit Card Fraud Detection
+"""XGBoost for credit card fraud detection.
 
-# === Import Libraries ===
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from xgboost import XGBClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
-import matplotlib.pyplot as plt
-from pprint import pprint
+Gradient-boosted trees: 100 estimators, maximum depth 3, learning rate 0.1.
+scale_pos_weight is set to (legitimate / fraud) in the training set to offset
+the class imbalance.
+"""
+import sys
+from pathlib import Path
 
-# === Load Dataset ===
-df = pd.read_csv("creditcard.csv")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import common  # noqa: E402
 
-# === Normalize 'Amount' and 'Time' ===
-scaler = StandardScaler()
-df['normAmount'] = scaler.fit_transform(df['Amount'].values.reshape(-1, 1))
-df['normTime'] = scaler.fit_transform(df['Time'].values.reshape(-1, 1))
-df.drop(['Amount', 'Time'], axis=1, inplace=True)
+import numpy as np  # noqa: E402
+from xgboost import XGBClassifier  # noqa: E402
 
-# === Split Features and Target ===
-X = df.drop('Class', axis=1)
-y = df['Class']
 
-# === Full Train-Test Split (No Subsampling) ===
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.3, stratify=y, random_state=42
-)
+def main():
+    common.set_seed()
+    X_train, X_test, y_train, y_test = common.classical_split()
 
-# === Calculate scale_pos_weight (Imbalance Handling) ===
-neg, pos = np.bincount(y_train)
-scale_pos_weight = neg / pos
+    neg, pos = np.bincount(y_train)
+    model = XGBClassifier(
+        n_estimators=100, max_depth=3, learning_rate=0.1,
+        scale_pos_weight=neg / pos, eval_metric="logloss",
+        random_state=common.SEED, n_jobs=-1,
+    )
+    with common.Timer() as t:
+        model.fit(X_train, y_train)
 
-# === Train XGBoost Model ===
-xgb_model = XGBClassifier(
-    n_estimators=100,
-    max_depth=3,
-    learning_rate=0.1,
-    scale_pos_weight=scale_pos_weight,  # handles imbalance
-    use_label_encoder=False,
-    eval_metric='logloss',
-    random_state=42
-)
-xgb_model.fit(X_train, y_train)
+    return common.evaluate(
+        "XGBoost", "xgboost", y_test,
+        model.predict(X_test), model.predict_proba(X_test)[:, 1], t.seconds,
+        extra={"scale_pos_weight": round(neg / pos, 1)},
+    )
 
-# === Predict ===
-y_pred_xgb = xgb_model.predict(X_test)
-y_proba_xgb = xgb_model.predict_proba(X_test)[:, 1]
 
-# === Evaluate ===
-conf_matrix_xgb = confusion_matrix(y_test, y_pred_xgb)
-class_report_xgb = classification_report(y_test, y_pred_xgb, output_dict=True)
-roc_auc_xgb = roc_auc_score(y_test, y_proba_xgb)
-
-print("=== Confusion Matrix (XGBoost) ===")
-print(conf_matrix_xgb)
-
-print("\n=== Classification Report (XGBoost) ===")
-pprint(class_report_xgb)
-
-print(f"\nROC AUC Score (XGBoost): {roc_auc_xgb:.4f}")
-
-# === ROC Curve ===
-fpr_xgb, tpr_xgb, _ = roc_curve(y_test, y_proba_xgb)
-
-plt.figure(figsize=(8, 5))
-plt.plot(fpr_xgb, tpr_xgb, label=f"AUC = {roc_auc_xgb:.4f}")
-plt.plot([0, 1], [0, 1], 'k--')
-plt.xlabel("False Positive Rate")
-plt.ylabel("True Positive Rate")
-plt.title("ROC Curve - XGBoost")
-plt.legend()
-plt.grid()
-plt.tight_layout()
-plt.show()
+if __name__ == "__main__":
+    main()
