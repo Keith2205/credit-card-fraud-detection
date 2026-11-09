@@ -76,7 +76,7 @@ python classical_models/xgboost_model.py
 # Rebuild the results table and ROC comparison from saved results
 python run_all.py --summary
 
-# Rebuild the PDF report from results/metrics.csv (needs Microsoft Edge or Google Chrome)
+# Rebuild the PDF report from results/metrics.csv (needs Tectonic: https://tectonic-typesetting.github.io)
 python report/build_report.py
 ```
 
@@ -99,8 +99,8 @@ credit-card-fraud-detection/
 │   ├── roc_curves/            # ROC curve for each model
 │   └── confusion_matrices/    # Confusion matrix for each model
 ├── report/
-│   ├── report_template.html   # Report source (numbers filled in from results/metrics.csv)
-│   ├── report.html            # Generated report
+│   ├── report_template.tex    # IEEE-style LaTeX source (numbers filled in from results/metrics.csv)
+│   ├── report.tex             # Generated LaTeX with the numbers filled in
 │   └── build_report.py        # Builds Final_Project_Report.pdf
 ├── Final_Project_Report.pdf
 ├── requirements.txt
